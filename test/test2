@@ -1,0 +1,36 @@
+var express = require('express'),
+    app = express.createServer(),
+    io = require('socket.io');
+
+//
+// define http routes
+//
+
+
+app.get('/', function(req, res){ 
+   res.send('Hello World'); 
+});
+
+
+//
+// turn it on
+//
+
+ 
+app.listen(8080);   
+var socket = io.listen(app);
+
+//
+// socket stuff
+//
+
+
+socket.on('connection', function(client){ 
+    client.on('message', function(data){
+	client.send('hey vance');
+	sys.puts(client + data);
+    }); 
+    client.on('disconnect', function(data){
+	sys.puts(client + 'disconnected' + data);
+    }); 
+}); 

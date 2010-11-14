@@ -1,0 +1,226 @@
+//
+//
+// Aurora Server v0.2
+// by Cam Pedersen
+//
+//
+
+require('./lib/lexer.js');
+require('./lib/POSTagger.js');
+var POST = require('./lib/POSTagger.js');
+
+var tcp = require('net'),
+    sys = require('sys'),
+    app = require('express').createServer(),
+    redis = require('redis'),
+    db = redis.createClient(),
+    brain = require('brain'),
+    EE = require('events').EventEmitter,
+    ee = new EE(),
+    Prompt = require('prompt'),
+    lev = require('./lib/lev.js');
+    dictionary = require('./lib/dictionary.js').dictionary; // a temp hack for decisions
+
+
+
+//
+// the good stuff
+//
+
+function thought(data,origin) {
+    this.origin = origin;
+    this.data = data;
+    this.type = typeof data;
+    this.interpretation = [];
+    this.decision = [];
+    this.response = "I'm not sure what you mean.";
+    this.status = 'new';
+}
+
+// eventstack will call a thought id at a given time
+var thoughtStack = [],
+    eventStack = [];
+
+function mind() {
+
+    // load all plugins
+    this.interpret = function(id) {
+	// pos tag if type = string
+	// analyze against watches for object
+	console.log('interpreting...');
+	var words = new Lexer().lex(thoughtStack[id].data);
+	var taggedWords = new POST.POSTagger().tag(words);
+	thoughtStack[id].interpretation = taggedWords;
+	console.log('interpretation: ' + sys.inspect(thoughtStack[id].interpretation));
+    };
+    this.decide = function(id) {
+	console.log('deciding...');
+	// convert thought object into action object
+	// what module? task, event, response
+	// most probable function
+	// or catch words from interpretation
+	var compared = [];
+	var lowest = 99;
+	var threshold = 0;
+	for (var i in dictionary) {
+	    var words = new Lexer().lex(dictionary[i].input);
+	    for (var j in words) {
+		var word = words[j];
+		var total = 0;
+		for (var k in thoughtStack[id].interpretation) {
+		    var diff = lev.levenshtein(word,thoughtStack[id].interpretation[k][0]);
+		    console.log(word + ' vs ' + thoughtStack[id].interpretation[k][0] + ': ' + diff);
+		    total += diff;
+		    if (total < lowest && total > threshold) {
+		        lowest = j;
+		    }
+		}
+		console.log(total);
+	    }
+	}
+	console.log(lowest);
+	var action = { kill: 'kenny' }; //module: action
+	thoughtStack[id].decision.push(action);
+    };
+    this.act = function(id) {
+	console.log('acting...');
+	// is there a response?
+	socket.clients[thoughtStack[id].origin].send({ message: ['aurora', thoughtStack[id].response] });
+	// eval thought.decision
+	return 'processed';
+    };
+
+    console.log('Aurora active...');
+}
+
+mind.prototype = new process.EventEmitter();
+
+mind.prototype.think = function(data,origin) {
+    var id = thoughtStack.push(new thought(data,origin));
+    ee.emit('thought',id);
+    return thoughtStack[id];
+};
+
+var aurora = new mind();
+
+// what do we do with a thought?
+// how do you process yours?
+ee.on('thought',function(id){
+    id -= 1; // because array starts at 0
+    var thought = thoughtStack[id];
+    aurora.interpret(id);
+    aurora.decide(id);
+    thoughtStack[id].status = aurora.act(id);
+    // console.log(thoughtStack[id]);
+    return thoughtStack[id].response;
+});
+
+// give aurora some blank thoughts
+//setInterval(function(){
+//    aurora.think('who am i?',this);
+//},0);
+
+function interact() {
+   Prompt()
+    .ask('aurora: ','input')
+    .tap(function(vars){
+	var input = vars.input.toString();
+	aurora.think(input.substring(0, input.length - 1),this);
+    }).end();
+}
+
+//
+// database stuff
+//
+
+
+db.on("error", function (err) {
+    console.log("Redis connection error to " + db.host + ":" + db.port + " - " + err);
+});
+db.set('users','0',function(err,reply){ sys.puts('Users connected: 0'); });
+db.set('unique','0');
+
+
+//
+// define http routes
+//
+
+
+app.get('/',function(req,res){
+    // res.send('<h1>Welcome to Aurora Mobile</h1>'); 
+    res.render('index.ejs');
+});
+
+app.listen(8080, function(){
+    sys.puts('Aurora serving HTTP on :8080...');
+});
+
+
+//
+// web sockets
+//
+
+
+var io = require('./socket.io');
+var socket = io.listen(app);
+var buffer = [];
+
+socket.on('connection', function(client){
+	client.send({ buffer:  buffer });
+	// client.broadcast({ announcement: client.sessionId + ' connected' });
+	sys.puts(sys.inspect(this.clients));
+
+	client.on('message', function(message){
+		var msg = { message: [client.sessionId, message] };
+		buffer.push(msg);
+		if (buffer.length > 15) buffer.shift();
+		var response = aurora.think(message,client.sessionId);
+		client.send(response);
+		sys.puts(response);
+		// client.broadcast(msg);
+	});
+
+	client.on('disconnect', function(){
+		// client.broadcast({ announcement: client.sessionId + ' disconnected' });
+	});
+});
+
+
+
+//
+// socket stuff
+//
+
+var server = tcp.createServer(function (stream) {
+  stream.setEncoding('utf8');
+  stream.on('connect', function () {
+    db.get('unique',function(err,res){
+	var id = res;
+    	db.hset('user:' + id, 'ip', stream.remoteAddress);
+    	db.hset('user:' + id, 'port', stream.remotePort);
+    	db.hset('user:' + id, 'type', stream.type);
+    	db.incr('unique');
+	db.incr('users');
+	db.hgetall('user:' + id + ':*', redis.print);
+    });
+    //sys.puts(sys.inspect(stream));
+    stream.write('Welcome to Aurora Alpha.\n');
+  });
+  stream.on('data', function (data) {
+    stream.write(data);
+    sys.puts(data);
+    // if authenticated, then
+    mind.interpret(data);
+  });
+  stream.on('end', function () {
+    stream.write('goodbye\r\n');
+    stream.end();
+  });
+});
+
+server.listen(9090, function() {
+    sys.puts('Aurora listening for sockets on :9090...');
+});
+
+
+interact();

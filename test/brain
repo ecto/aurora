@@ -1,0 +1,118 @@
+
+var brain = require('brain'),
+    net = new brain.NeuralNetwork(),
+    fs = require('fs')
+    sys = require('sys'),
+    json = require('json'),
+    teams = [],
+    games = [],
+    Prompt = require('prompt');
+
+
+sys.puts('Loading teams...');
+
+fs.readFile('./teams.json','utf8',function(err,data){
+    data = json.parse(data);
+    for (var i in data) {
+	var name = data[i]["team_name"];
+	//sys.puts(sys.inspect(name));
+	teams.push(name);
+    }
+});
+
+sys.puts('Loading games...');
+
+fs.readFile('./games.json','utf8',function(err,data){
+    if (err) throw err;
+    var games = [];
+    data = json.parse(data);
+    for (var i in data) {
+//sys.puts(sys.inspect(data[i]));
+	var tempGame = {
+	    input: {
+		team1: teams.indexOf(data[i]["Winner/tie"]), // / 100
+		//at: data[i][""] ? 1 : 0,
+		team2: teams.indexOf(data[i]["Loser/tie"]) // / 100
+	    },
+	    output: {
+		pts1: data[i]["PtsW"] / 100,
+		pts2: data[i]["PtsL"] / 100,
+		yds1: data[i]["YdsW"] / 1000,
+		yds2: data[i]["YdsL"] / 1000,
+		to1: data[i]["TOW"] / 10,
+		to2: data[i]["TOL"] / 10
+	    }
+	}
+	sys.puts('Learning ' + data[i]["Winner/tie"] + ' (' + tempGame.input['team1'] + ') ' + tempGame.input['at'] + ' ' + data[i]["Loser/tie"] + ' (' + tempGame.input['team2'] + ')... (Game #' + i + ')');
+	games.push(tempGame);
+    }
+
+    //sys.puts(sys.inspect(games));
+    sys.puts('Training neural network... (this may take a few moments)');
+    net.train(games);
+
+sys.puts('-----------------------------------');
+for (var i in teams) {
+    sys.puts(i + ' ' + teams[i]);
+}
+
+Prompt()
+    .ask('Team 1?', 'team1')
+    .ask('Home/away? (1/0)', 'hoa')
+    .ask('Team 2?', 'team2')
+    .tap(function (vars) {
+	sys.puts('Running neural network...');
+	var currentGame = {
+	    team1: parseInt(vars['team1']),
+	    at: parseInt(vars.hoa),
+	    team2: parseInt(vars['team2'])
+	}
+
+	var accuracy = 500;
+	var output = [];
+	var largeOutput = [];
+	var t1p = 0;
+	var t2p = 0, t1y = 0, t2y = 0, t1t = 0, t2t = 0;
+	for (var i = 0; i <= accuracy; i++) {
+    	    var tempOutput = net.run(currentGame);
+	    if (i % 2 == 1) {
+		var team1 = currentGame['team1'];
+		currentGame['team1'] = currentGame['team2'];
+		currentGame['team2'] = team1;
+	    }
+		//sys.puts(sys.inspect(i % 2));
+	    t1p += tempOutput['pts1'];
+	    t1y += tempOutput['yds1'];
+	    t1t += tempOutput['to1'];
+	    t2p += tempOutput['pts2'];
+	    t2y += tempOutput['yds2'];
+	    t2t += tempOutput['to2'];
+	    largeOutput.push(tempOutput);
+
+	    // now retrain to get some different values out
+	    //net = new brain.NeuralNetwork();
+    	    net.train(games);
+	}
+	t1p = t1p / accuracy;
+	t1y = t1y / accuracy;
+	t1t = t1t / accuracy;
+	t2p = t2p / accuracy;
+	t2y = t2y / accuracy;
+	t2t = t2t / accuracy;
+	//for (var i in largeOutput)
+	//sys.puts(sys.inspect(largeOutput));
+	sys.puts('');
+	sys.puts('-----------------------------------');
+	sys.puts(teams[currentGame['team1']] + ': ');
+	sys.puts('    ' + Math.round(t1p * 100) + ' points');
+	sys.puts('    ' + Math.round(t1y * 1000) + ' yards');
+	sys.puts('    ' + Math.floor(t1t * 10) + ' turnovers');
+	sys.puts(teams[currentGame['team2']] + ': ');
+	sys.puts('    ' + Math.round(t2p * 100) + ' points');
+	sys.puts('    ' + Math.round(t2y * 1000) + ' yards');
+	sys.puts('    ' + Math.floor(t2t * 10) + ' turnovers');
+	sys.puts('-----------------------------------');
+	sys.puts('');
+    })
+    .end();
+});

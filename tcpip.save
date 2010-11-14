@@ -1,0 +1,77 @@
+//
+//
+// Aurora Server v0.1
+// by Cam Pedersen
+//
+//
+
+var tcp = require('net'),
+    sys = require('sys'),
+    app = require('express').createServer(),
+    redis = require('redis'),
+    db = redis.createClient(),
+    brain = require('brain');
+
+
+//
+// database stuff
+//
+
+
+db.on("error", function (err) {
+    console.log("Redis connection error to " + db.host + ":" + db.port + " - " + err);
+});
+db.set('users','0',function(err,reply){ sys.puts('Users connected: 0'); });
+db.set('unique','0');
+
+
+//
+// define http routes
+//
+
+
+app.get('/',function(req,res){
+ res.send('<h1>Welcome to Aurora Mobile</h1>'); 
+});
+
+app.listen(8080, function(){
+    sys.puts('Aurora serving HTTP on :8080...');
+});
+
+
+//
+// socket stuff
+//
+
+var server = tcp.createServer(function (stream) {
+  stream.setEncoding('utf8');
+  stream.on('connect', function () {
+    db.get('unique',function(err,res){
+	var id = res;
+    	db.hset('user:' + id, 'ip', stream.remoteAddress);
+    	db.hset('user:' + id, 'port', stream.remotePort);
+    	db.hset('user:' + id, 'type', stream.type);
+    	db.incr('unique');
+	db.incr('users');
+	db.hgetall('user:' + id + ':*', redis.print);
+    });
+    //sys.puts(sys.inspect(stream));
+    stream.write('Welcome to Aurora Alpha.\n');
+  });
+  stream.on('data', function (data) {
+    stream.write(data);
+    sys.puts(data);
+  });
+  stream.on('end', function () {
+    stream.write('goodbye\r\n');
+    stream.end();
+  });
+});
+
+server.listen(9090, function() {
+    sys.puts('Aurora listening for sockets on :9090...');
+});
+
+sys.puts('Loading brain');
+
+

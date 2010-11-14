@@ -1,0 +1,15 @@
+require('./lib/');
+require('./lib/');
+require('./lib/');
+var lexer = new Lexer();
+var tagger = new POSTagger();
+var start = new Date().getTime();
+var words = lexer.lex(testString);
+var tags = tagger.tag(words);
+var end = new Date().getTime();
+difference = (end - start);
+for (i in tags) {
+	var tag = tags[i];
+	print(tag[0] + " /" + tag[1]);
+}
+print ("Tokenized and tagged " + words.length + " words in " + difference + " milliseconds");
